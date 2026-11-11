@@ -115,3 +115,13 @@ If you use SimEHR in your work, please cite the preview release.
   note         = {Preview release}
 }
 ```
+
+## Modifications in this fork
+
+This fork is based on [HealthRex/SimEHR](https://github.com/HealthRex/SimEHR) (Apache-2.0) and was changed as follows. The original authors' license, citation and data license are unchanged.
+
+- Patient Care menu items now work: Telephone Call, Send Letter, Addendum.
+- New screens: Release of Information request, Referral Tracking (closed loop), Duplicate Chart Review.
+- New files: `lib/duplicates.ts`, `SOURCES.md` (public sources for each modeled workflow).
+- Edited files: `lib/store.ts`, `lib/mainMenu.ts`, `lib/agentApi.ts`, `components/MainMenu.tsx`, `components/ModalHost.tsx`, `smoke.mjs`.
+- All data is synthetic. No real patient data or employer-specific workflow is included.
