@@ -1,5 +1,7 @@
 # SimEHR: a high-fidelity EHR environment for computer-use agents
 
+> **About this fork.** I extended SimEHR, an open-source simulated EHR, with three health information management workflows and wired up its dead Patient Care menu items. Release of Information enforces the HIPAA right-of-access 30-day clock and the required elements of a valid authorization. Referral Tracking follows a referral from order to received specialist report, using the CMS50 closing-the-referral-loop rule. Duplicate Chart Review requires at least two matching identifiers before it accepts a merge decision and picks the surviving chart by appointment activity, using logic from my own him-workbench project. Every workflow is documented against public sources in [`SOURCES.md`](SOURCES.md), is covered by the repo's automated browser smoke test, and uses synthetic data only. Based on [HealthRex/SimEHR](https://github.com/HealthRex/SimEHR); see [Modifications in this fork](#modifications-in-this-fork).
+
 SimEHR is a high-fidelity, interactive simulation of the electronic health record (EHR) interface that
 physicians use every day. It exists so that computer-use agents can be evaluated under the conditions
 clinicians actually work in: familiar screens, mouse and keyboard input, and full patient charts. 
