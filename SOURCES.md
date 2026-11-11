@@ -19,3 +19,8 @@ Public references: CMS50 measure specification (eCQI Resource Center); public cl
 - Primary-record choice (which chart survives a merge): soonest upcoming appointment, else most recent past appointment, else escalate to human review. This tiebreak is the project's own rule, not a published standard.
 - Guardrail: the screen only records a decision. It never merges or edits either chart.
 Synthetic data only.
+
+# Accounting of disclosures
+Modeled on 45 CFR 164.528 (eCFR / Cornell LII public text). Each logged disclosure carries the date, the recipient's name (and address if known), a brief description of what was disclosed, and a brief statement of the purpose. An accounting covers the six years before the request, or less if the patient asks for a shorter period.
+Disclosures the rule exempts are refused with the reason, not logged: treatment, payment or health care operations; disclosures to the patient; disclosures under a signed authorization. (Other exemptions in the rule, such as facility directory and national security, are not modeled.) This is why a Release of Information request made under a signed authorization or for the patient's own access does not appear in this log.
+Public references: eCFR 45 CFR 164.528; HHS Privacy Rule summary. Synthetic data only.

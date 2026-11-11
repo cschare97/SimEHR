@@ -7,10 +7,11 @@
 import { useSyncExternalStore } from "react";
 import type { Case, Medication, Order, Problem, AuditEntry } from "./types";
 import { NORMAL_DEFAULTS } from "./noteTemplate";
+import { isExempt, EXEMPT_BASES } from "./disclosures";
 import { matchEvidence, pickPrimary, MIN_EVIDENCE_TO_MERGE, type RecordFacts } from "./duplicates";
 
 export interface Modal {
-  type: "advisory" | "signvisit" | "signresult" | "menu" | "report" | "phonecall" | "letter" | "addendum" | "roi" | "referrals" | "duplicates";
+  type: "advisory" | "signvisit" | "signresult" | "menu" | "report" | "phonecall" | "letter" | "addendum" | "roi" | "referrals" | "duplicates" | "disclosures";
   kind?: string | null;
 }
 
@@ -64,6 +65,16 @@ export interface DuplicateReview {
   rationale: string;
 }
 
+export interface Disclosure {
+  id: string;
+  date: string; // yyyy-mm-dd
+  recipient: string;
+  address: string; // optional, "" if unknown
+  description: string; // brief description of the PHI disclosed
+  purpose: string; // brief statement of the purpose
+  basis: string;
+}
+
 export interface SimState {
   caseData: Case | null;
   activity: string;
@@ -84,6 +95,7 @@ export interface SimState {
   roiRequests: RoiRequest[];
   referrals: Referral[];
   duplicateReviews: DuplicateReview[];
+  disclosures: Disclosure[];
   modal: Modal | null;
   menuOpen: boolean;
   searchOpen: boolean;
@@ -122,6 +134,7 @@ let state: SimState = {
   roiRequests: [],
   referrals: [],
   duplicateReviews: [],
+  disclosures: [],
   modal: null,
   menuOpen: false,
   searchOpen: false,
@@ -146,7 +159,7 @@ export function log(actor: string, action: string, detail = "") {
   set((s) => ({ audit: [...s.audit, { ts: now(), actor, action, detail }] }));
 }
 
-const FRESH: Partial<SimState> = { orders: [], deliverable: "", noteDraft: "", patientReply: "", patientReplyDraft: "", noteExam: {}, advisoryResponses: [], visitSigned: false, phoneCalls: [], letters: [], addenda: [], roiRequests: [], referrals: [], duplicateReviews: [], modal: null, crNoteSel: null, alertsAcked: [], menuOpen: false, searchOpen: false };
+const FRESH: Partial<SimState> = { orders: [], deliverable: "", noteDraft: "", patientReply: "", patientReplyDraft: "", noteExam: {}, advisoryResponses: [], visitSigned: false, phoneCalls: [], letters: [], addenda: [], roiRequests: [], referrals: [], duplicateReviews: [], disclosures: [], modal: null, crNoteSel: null, alertsAcked: [], menuOpen: false, searchOpen: false };
 
 export function loadCase(c: Case, actor = "system") {
   _orderSeq = 0;   // ids restart per episode, so an audit log id means the same thing across runs
@@ -341,6 +354,22 @@ export function reviewDuplicate(a: RecordFacts, b: RecordFacts, decision: Duplic
   const rev: DuplicateReview = { id, thisMrn: a.mrn, otherMrn: b.mrn, evidence, decision, primary, secondary, primaryReason, rationale: rationale.trim() };
   set((s) => ({ duplicateReviews: [...s.duplicateReviews, rev], modal: null }));
   log(actor, "duplicate_review", `${id}: ${a.mrn} vs ${b.mrn} -> ${decision}${primary ? ` (primary ${primary})` : ""}; matched: ${evidence.join(", ") || "none"}`);
+  return null;
+}
+
+// ---- Accounting of disclosures ----
+/** Logs a disclosure the patient could ask to see in an accounting. Returns an error message (and records nothing) if a
+ *  required field is missing or the disclosure is one the rule exempts from the accounting. */
+export function logDisclosure(d: Omit<Disclosure, "id">, actor = "human"): string | null {
+  if (!d.date) return "Enter the date of the disclosure.";
+  if (d.date > todayLocal()) return "The disclosure date cannot be in the future.";
+  if (!d.recipient.trim()) return "Enter who received the information.";
+  if (!d.description.trim()) return "Enter a brief description of what was disclosed.";
+  if (!d.purpose.trim()) return "Enter a brief statement of the purpose.";
+  if (isExempt(d.basis)) return `Not recorded: "${d.basis}" is exempt from the accounting of disclosures. Exempt: ${EXEMPT_BASES.join("; ")}.`;
+  const id = `disc${state.disclosures.length + 1}`;
+  set((s) => ({ disclosures: [...s.disclosures, { id, ...d }] }));
+  log(actor, "disclosure_logged", `${id}: ${d.date} to ${d.recipient} (${d.basis})`);
   return null;
 }
 
@@ -560,6 +589,7 @@ export interface Checkpoint {
   roiRequests?: RoiRequest[];
   referrals?: Referral[];
   duplicateReviews?: DuplicateReview[];
+  disclosures?: Disclosure[];
   audit: AuditEntry[];
   case: { id: string; medications?: Medication[]; problems?: Problem[] } | null;
 }
@@ -587,6 +617,7 @@ export function checkpoint(): Checkpoint {
       roiRequests: s.roiRequests,
       referrals: s.referrals,
       duplicateReviews: s.duplicateReviews,
+      disclosures: s.disclosures,
       audit: s.audit,
       case: s.caseData ? { id: s.caseData.id, medications: s.caseData.medications, problems: s.caseData.problems } : null,
     }),
@@ -618,6 +649,7 @@ export function hydrate(c: Case, cp: Checkpoint, actor = "system") {
     roiRequests: cp.roiRequests ?? [],
     referrals: cp.referrals ?? [],
     duplicateReviews: cp.duplicateReviews ?? [],
+    disclosures: cp.disclosures ?? [],
     audit: cp.audit ?? [],
     runId: cp.runId,
     modal: null,

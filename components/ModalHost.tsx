@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { useSim, closeModal, respondAdvisory, signVisit, advisoryId, logPhoneCall, sendLetter, saveAddendum, submitRoi, addReferral, advanceReferral, reviewDuplicate, type DuplicateDecision, todayLocal, REFERRAL_FLOW, type ReferralStatus, addDays, ROI_CORE, ROI_STATEMENTS } from "@/lib/store";
+import { useSim, closeModal, respondAdvisory, signVisit, advisoryId, logPhoneCall, sendLetter, saveAddendum, submitRoi, addReferral, advanceReferral, reviewDuplicate, type DuplicateDecision, logDisclosure, todayLocal, REFERRAL_FLOW, type ReferralStatus, addDays, ROI_CORE, ROI_STATEMENTS } from "@/lib/store";
 import { noteWhen } from "@/lib/types";
 import { matchEvidence } from "@/lib/duplicates";
+import { ACCOUNTABLE_BASES, ALL_BASES, withinLookback, lookbackStart } from "@/lib/disclosures";
 import { cardOrders, imagingNotes, labOrders, otherOrders, procOrders, radOrders, referralOrders } from "@/lib/projections";
 import CRLabReport from "@/components/activities/CRLabReport";
 import { ECGReport, EncounterReport, ImagingReport, MedReport, NoteReport, OrderReport } from "@/components/activities/CRReports";
@@ -417,6 +418,57 @@ function DuplicateModal() {
   );
 }
 
+function DisclosureModal() {
+  const all = useSim((s) => s.disclosures);
+  const [asOf, setAsOf] = useState(todayLocal);
+  const [date, setDate] = useState(todayLocal);
+  const [recipient, setRecipient] = useState("");
+  const [address, setAddress] = useState("");
+  const [description, setDescription] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [basis, setBasis] = useState<string>(ACCOUNTABLE_BASES[0]);
+  const [err, setErr] = useState("");
+  const listed = withinLookback(all, asOf);
+  return (
+    <div className="modal" id="modal-content" data-testid="modal-disclosures" style={{ minWidth: 640 }}>
+      <div className="modal-header"><span>Accounting of Disclosures</span><span className="x" onClick={closeModal}>✕</span></div>
+      <div className="modal-body">
+        <Field label="Accounting requested on"><input data-testid="disc-asof" type="date" value={asOf} onChange={(e) => setAsOf(e.target.value)} /></Field>
+        <p data-testid="disc-count" style={{ margin: "4px 0 8px" }}>Covers disclosures from <b>{lookbackStart(asOf) || "—"}</b> (six years back): <b>{listed.length}</b> listed</p>
+        <table data-testid="disc-table" style={{ width: "100%", marginBottom: 12 }}>
+          <thead><tr><th align="left">Date</th><th align="left">Recipient</th><th align="left">What was disclosed</th><th align="left">Purpose</th></tr></thead>
+          <tbody>
+            {listed.length === 0 && <tr><td colSpan={4}>No disclosures to list.</td></tr>}
+            {listed.map((d) => (
+              <tr key={d.id} data-testid={`disc-row-${d.id}`}><td>{d.date}</td><td>{d.recipient}{d.address ? `, ${d.address}` : ""}</td><td>{d.description}</td><td>{d.purpose}</td></tr>
+            ))}
+          </tbody>
+        </table>
+        <div style={{ fontWeight: 700, marginBottom: 3 }}>Log a disclosure</div>
+        <Field label="Date disclosed"><input data-testid="disc-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Received by (name)"><input data-testid="disc-recipient" value={recipient} onChange={(e) => setRecipient(e.target.value)} /></Field>
+        <Field label="Address (if known)"><input data-testid="disc-address" value={address} onChange={(e) => setAddress(e.target.value)} /></Field>
+        <Field label="What was disclosed"><input data-testid="disc-description" value={description} onChange={(e) => setDescription(e.target.value)} /></Field>
+        <Field label="Purpose"><input data-testid="disc-purpose" value={purpose} onChange={(e) => setPurpose(e.target.value)} /></Field>
+        <Field label="Basis for disclosure">
+          <select data-testid="disc-basis" value={basis} onChange={(e) => setBasis(e.target.value)}>
+            {ALL_BASES.map((b) => <option key={b}>{b}</option>)}
+          </select>
+        </Field>
+        {err && <p data-testid="disc-error" style={{ color: "#b00020", fontWeight: 700 }}>{err}</p>}
+      </div>
+      <div className="modal-footer">
+        <button className="btn" onClick={closeModal}>Close</button>
+        <button className="btn primary" data-testid="disc-save" onClick={() => {
+          const e = logDisclosure({ date, recipient, address, description, purpose, basis });
+          setErr(e ?? "");
+          if (!e) { setRecipient(""); setAddress(""); setDescription(""); setPurpose(""); }
+        }}>Log Disclosure</button>
+      </div>
+    </div>
+  );
+}
+
 export default function ModalHost() {
   const modal = useSim((s) => s.modal);
   if (!modal) return null;
@@ -432,6 +484,7 @@ export default function ModalHost() {
       {modal.type === "roi" && <RoiModal />}
       {modal.type === "referrals" && <ReferralModal />}
       {modal.type === "duplicates" && <DuplicateModal />}
+      {modal.type === "disclosures" && <DisclosureModal />}
     </div>
   );
 }

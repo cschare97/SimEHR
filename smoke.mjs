@@ -240,8 +240,32 @@ await page.fill('[data-testid="dup-a-last"]', "2026-01-01");
 await page.click('[data-testid="dup-save"]');
 const dup = (await S()).duplicateReviews;
 assert(dup.length === 1 && dup[0].decision === "merge" && dup[0].primary === CASE.patient.mrn, "Duplicate review: a 3-identifier merge is recorded with the chart that has visits as primary");
+await openMenu("Accounting of Disclosures", "modal-disclosures");
+await page.fill('[data-testid="disc-recipient"]', "State Health Dept");
+await page.fill('[data-testid="disc-description"]', "Immunization record");
+await page.fill('[data-testid="disc-purpose"]', "Public health reporting");
+await page.selectOption('[data-testid="disc-basis"]', "Treatment, payment or health care operations");
+await page.click('[data-testid="disc-save"]');
+assert((await S()).disclosures.length === 0, "Disclosures: a treatment/payment/operations disclosure is exempt and refused");
+await page.selectOption('[data-testid="disc-basis"]', "Public health activity");
+await page.fill('[data-testid="disc-purpose"]', "");
+await page.click('[data-testid="disc-save"]');
+assert((await S()).disclosures.length === 0, "Disclosures: a missing purpose is refused");
+await page.fill('[data-testid="disc-purpose"]', "Public health reporting");
+await page.click('[data-testid="disc-save"]');
+assert((await S()).disclosures.length === 1, "Disclosures: an accountable disclosure is recorded");
+await page.fill('[data-testid="disc-date"]', "2015-01-01");
+await page.fill('[data-testid="disc-recipient"]', "Old Recipient");
+await page.fill('[data-testid="disc-description"]', "Old record");
+await page.fill('[data-testid="disc-purpose"]', "Old purpose");
+await page.click('[data-testid="disc-save"]');
+assert((await S()).disclosures.length === 2, "Disclosures: an old disclosure is recorded");
+assert((await page.textContent('[data-testid="disc-count"]')).includes("1 listed"), "Disclosures: the six-year lookback lists only the recent one");
+await page.fill('[data-testid="disc-asof"]', "2017-01-01");
+assert((await page.textContent('[data-testid="disc-count"]')).includes("1 listed"), "Disclosures: changing the request date changes what the lookback lists");
+
 const audit2 = await page.evaluate(() => window.SimEHR.getAuditLog().map((a) => a.action));
-for (const a of ["phone_call", "send_letter", "addendum", "roi_request", "referral_added", "referral_status", "duplicate_review"]) {
+for (const a of ["phone_call", "send_letter", "addendum", "roi_request", "referral_added", "referral_status", "duplicate_review", "disclosure_logged"]) {
   assert(audit2.includes(a), `audit log records ${a}`);
 }
 
@@ -250,7 +274,7 @@ await page.evaluate(() => window.SimEHR.resetState());
 assert((await page.evaluate(() => window.SimEHR.getState().orders.length)) === 0, "resetState() clears the episode state");
 {
   const z = await page.evaluate(() => window.SimEHR.getState());
-  assert(["phoneCalls", "letters", "addenda", "roiRequests", "referrals", "duplicateReviews"].every((k) => z[k].length === 0), "resetState() clears the Patient Care workflow records");
+  assert(["phoneCalls", "letters", "addenda", "roiRequests", "referrals", "duplicateReviews", "disclosures"].every((k) => z[k].length === 0), "resetState() clears the Patient Care workflow records");
 }
 
 await browser.close();

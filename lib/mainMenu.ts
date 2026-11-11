@@ -23,7 +23,7 @@ export const MAIN_MENU: MenuCat[] = [
     { label: "Chart", icon: "📁", activity: "snapshot" },
     { label: "Patient Lists", icon: "≣", activity: "patient-lists" }, { sep: true },
     { label: "Telephone Call", icon: "📞", action: "phonecall" }, { label: "Refill Medication", icon: "💊", activity: "medications" },
-    { label: "Send Letter", icon: "✉", action: "letter" }, { label: "Release of Information", icon: "📤", action: "roi" }, { label: "Referral Tracking", icon: "↗", action: "referrals" }, { label: "Duplicate Chart Review", icon: "⧉", action: "duplicates" }, { label: "Place Orders", icon: "📋", activity: "orders" },
+    { label: "Send Letter", icon: "✉", action: "letter" }, { label: "Release of Information", icon: "📤", action: "roi" }, { label: "Referral Tracking", icon: "↗", action: "referrals" }, { label: "Duplicate Chart Review", icon: "⧉", action: "duplicates" }, { label: "Accounting of Disclosures", icon: "📒", action: "disclosures" }, { label: "Place Orders", icon: "📋", activity: "orders" },
     { label: "Addendum", icon: "📝", action: "addendum" }, { label: "Sign Encounter", icon: "✔", action: "sign" }, { sep: true },
     { label: "Research Studies" },
   ] },
