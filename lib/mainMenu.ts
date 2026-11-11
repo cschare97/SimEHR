@@ -22,9 +22,9 @@ export const MAIN_MENU: MenuCat[] = [
   { cat: "Patient Care", items: [
     { label: "Chart", icon: "📁", activity: "snapshot" },
     { label: "Patient Lists", icon: "≣", activity: "patient-lists" }, { sep: true },
-    { label: "Telephone Call", icon: "📞" }, { label: "Refill Medication", icon: "💊", activity: "medications" },
-    { label: "Send Letter", icon: "✉" }, { label: "Place Orders", icon: "📋", activity: "orders" },
-    { label: "Addendum", icon: "📝" }, { label: "Sign Encounter", icon: "✔", action: "sign" }, { sep: true },
+    { label: "Telephone Call", icon: "📞", action: "phonecall" }, { label: "Refill Medication", icon: "💊", activity: "medications" },
+    { label: "Send Letter", icon: "✉", action: "letter" }, { label: "Release of Information", icon: "📤", action: "roi" }, { label: "Referral Tracking", icon: "↗", action: "referrals" }, { label: "Duplicate Chart Review", icon: "⧉", action: "duplicates" }, { label: "Place Orders", icon: "📋", activity: "orders" },
+    { label: "Addendum", icon: "📝", action: "addendum" }, { label: "Sign Encounter", icon: "✔", action: "sign" }, { sep: true },
     { label: "Research Studies" },
   ] },
   { cat: "Reports", items: [{ label: "Report Library", icon: "🔍" }, { label: "Scheduled Reports" }] },

@@ -7,10 +7,61 @@
 import { useSyncExternalStore } from "react";
 import type { Case, Medication, Order, Problem, AuditEntry } from "./types";
 import { NORMAL_DEFAULTS } from "./noteTemplate";
+import { matchEvidence, pickPrimary, MIN_EVIDENCE_TO_MERGE, type RecordFacts } from "./duplicates";
 
 export interface Modal {
-  type: "advisory" | "signvisit" | "signresult" | "menu" | "report";
+  type: "advisory" | "signvisit" | "signresult" | "menu" | "report" | "phonecall" | "letter" | "addendum" | "roi" | "referrals" | "duplicates";
   kind?: string | null;
+}
+
+export interface PhoneCall { id: string; with: string; phone: string; reason: string; outcome: string; notes: string; }
+export interface LetterRecord { id: string; to: string; kind: string; body: string; }
+export interface Addendum { id: string; text: string; }
+
+export interface RoiRequest {
+  id: string;
+  kind: "access" | "authorization"; // 45 CFR 164.524 patient access vs 164.508 third-party authorization
+  requester: string;
+  recipient: string;
+  info: string;
+  received: string; // yyyy-mm-dd
+  due: string; // received + 30 calendar days
+  missing: string[]; // authorization elements not present (always empty for access requests)
+  status: "Ready to release" | "Deficient - return to requester";
+}
+
+export const REFERRAL_FLOW = ["Ordered", "Sent", "Scheduled", "Completed", "Report Received"] as const;
+export type ReferralStatus = (typeof REFERRAL_FLOW)[number] | "Cancelled";
+export interface Referral {
+  id: string;
+  specialty: string;
+  reason: string;
+  orderedBy: string;
+  ordered: string; // yyyy-mm-dd
+  status: ReferralStatus;
+  scheduled?: string;
+  completed?: string;
+  reportDate?: string;
+  reportFrom?: string;
+  history: { status: ReferralStatus; at: string }[];
+}
+
+export function todayLocal(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export type DuplicateDecision = "merge" | "not_duplicate" | "escalate";
+export interface DuplicateReview {
+  id: string;
+  thisMrn: string;
+  otherMrn: string;
+  evidence: string[];
+  decision: DuplicateDecision;
+  primary: string | null; // surviving MRN (merge only)
+  secondary: string | null;
+  primaryReason: string;
+  rationale: string;
 }
 
 export interface SimState {
@@ -27,6 +78,12 @@ export interface SimState {
   noteExam: Record<string, string[]>;
   advisoryResponses: { kind: string | null; action: string }[];
   visitSigned: boolean;
+  phoneCalls: PhoneCall[];
+  letters: LetterRecord[];
+  addenda: Addendum[];
+  roiRequests: RoiRequest[];
+  referrals: Referral[];
+  duplicateReviews: DuplicateReview[];
   modal: Modal | null;
   menuOpen: boolean;
   searchOpen: boolean;
@@ -59,6 +116,12 @@ let state: SimState = {
   noteExam: {},
   advisoryResponses: [],
   visitSigned: false,
+  phoneCalls: [],
+  letters: [],
+  addenda: [],
+  roiRequests: [],
+  referrals: [],
+  duplicateReviews: [],
   modal: null,
   menuOpen: false,
   searchOpen: false,
@@ -83,7 +146,7 @@ export function log(actor: string, action: string, detail = "") {
   set((s) => ({ audit: [...s.audit, { ts: now(), actor, action, detail }] }));
 }
 
-const FRESH: Partial<SimState> = { orders: [], deliverable: "", noteDraft: "", patientReply: "", patientReplyDraft: "", noteExam: {}, advisoryResponses: [], visitSigned: false, modal: null, crNoteSel: null, alertsAcked: [], menuOpen: false, searchOpen: false };
+const FRESH: Partial<SimState> = { orders: [], deliverable: "", noteDraft: "", patientReply: "", patientReplyDraft: "", noteExam: {}, advisoryResponses: [], visitSigned: false, phoneCalls: [], letters: [], addenda: [], roiRequests: [], referrals: [], duplicateReviews: [], modal: null, crNoteSel: null, alertsAcked: [], menuOpen: false, searchOpen: false };
 
 export function loadCase(c: Case, actor = "system") {
   _orderSeq = 0;   // ids restart per episode, so an audit log id means the same thing across runs
@@ -173,6 +236,113 @@ export function respondAdvisory(kind: string | null, action: string, actor = "hu
 /** Identity of advisory i. The case data leaves `kind` null in every shipped case, so responses would all
  *  collapse to the same key and a second advisory could never be told apart from the first. */
 export const advisoryId = (b: { kind?: string | null }, i: number) => b?.kind ?? String(i);
+
+// ---- Telephone Call / Send Letter / Addendum (Patient Care menu) ----
+export function logPhoneCall(c: Omit<PhoneCall, "id">, actor = "human") {
+  const id = `call${state.phoneCalls.length + 1}`;
+  set((s) => ({ phoneCalls: [...s.phoneCalls, { id, ...c }], modal: null }));
+  log(actor, "phone_call", `${id}: ${c.with} (${c.outcome}) ${c.reason}`);
+  return id;
+}
+export function sendLetter(l: Omit<LetterRecord, "id">, actor = "human") {
+  const id = `let${state.letters.length + 1}`;
+  set((s) => ({ letters: [...s.letters, { id, ...l }], modal: null }));
+  log(actor, "send_letter", `${id}: ${l.kind} to ${l.to}`);
+  return id;
+}
+export function saveAddendum(text: string, actor = "human") {
+  const id = `add${state.addenda.length + 1}`;
+  set((s) => ({ addenda: [...s.addenda, { id, text }], modal: null }));
+  log(actor, "addendum", `${id}: ${text.length} chars`);
+  return id;
+}
+
+// ---- Release of Information ----
+export const ROI_CORE = ["Description of the information", "Who may disclose", "Who may receive", "Purpose", "Expiration date or event", "Patient signature and date"];
+export const ROI_STATEMENTS = ["Right to revoke in writing", "Treatment not conditioned on signing", "Redisclosure may no longer be protected"];
+
+export function addDays(ymd: string, n: number): string {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return "";
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+export function submitRoi(r: Omit<RoiRequest, "id" | "due" | "status" | "missing"> & { present: string[] }, actor = "human") {
+  const id = `roi${state.roiRequests.length + 1}`;
+  const required = r.kind === "authorization" ? [...ROI_CORE, ...ROI_STATEMENTS] : [];
+  const missing = required.filter((e) => !r.present.includes(e));
+  const status: RoiRequest["status"] = missing.length ? "Deficient - return to requester" : "Ready to release";
+  const { present: _p, ...rest } = r;
+  const req: RoiRequest = { id, ...rest, due: addDays(r.received, 30), missing, status };
+  set((s) => ({ roiRequests: [...s.roiRequests, req], modal: null }));
+  log(actor, "roi_request", `${id}: ${r.kind} -> ${status}${missing.length ? ` (missing: ${missing.join("; ")})` : ""}`);
+  return id;
+}
+
+// ---- Referral tracking (closed loop) ----
+export function addReferral(r: { specialty: string; reason: string; orderedBy: string; ordered: string }, actor = "human") {
+  const id = `ref${state.referrals.length + 1}`;
+  const ref: Referral = { id, ...r, status: "Ordered", history: [{ status: "Ordered", at: r.ordered }] };
+  set((s) => ({ referrals: [...s.referrals, ref] }));
+  log(actor, "referral_added", `${id}: ${r.specialty} (${r.reason})`);
+  return id;
+}
+
+/** Move a referral forward one step, or cancel it. Returns an error message (and changes nothing) if a rule fails. */
+export function advanceReferral(id: string, to: ReferralStatus, d: { date?: string; reportFrom?: string }, actor = "human"): string | null {
+  const ref = state.referrals.find((r) => r.id === id);
+  if (!ref) return "Referral not found.";
+  if (ref.status === "Report Received" || ref.status === "Cancelled") return "This referral is already closed.";
+  const at = d.date || todayLocal();
+  const next = { ...ref };
+  if (to === "Cancelled") {
+    if (ref.status === "Completed") return "A completed visit cannot be cancelled; record the report instead.";
+  } else {
+    if (REFERRAL_FLOW.indexOf(to) !== REFERRAL_FLOW.indexOf(ref.status) + 1) return `Next step after ${ref.status} is ${REFERRAL_FLOW[REFERRAL_FLOW.indexOf(ref.status) + 1]}.`;
+    if (at < ref.ordered) return "Date cannot be before the referral was ordered.";
+    if (to === "Scheduled") next.scheduled = at;
+    if (to === "Completed") next.completed = at;
+    if (to === "Report Received") {
+      // Closed loop only counts a consult report from the specialist, received after the order (CMS50 logic).
+      const from = (d.reportFrom ?? "").trim();
+      if (!from) return "Enter who sent the report.";
+      if (from.toLowerCase() === ref.orderedBy.trim().toLowerCase()) return "The report must come from the specialist, not the ordering provider.";
+      next.reportDate = at;
+      next.reportFrom = from;
+    }
+  }
+  next.status = to;
+  next.history = [...ref.history, { status: to, at }];
+  set((s) => ({ referrals: s.referrals.map((r) => (r.id === id ? next : r)) }));
+  log(actor, "referral_status", `${id}: ${ref.status} -> ${to}${to === "Report Received" ? " (loop closed)" : ""}`);
+  return null;
+}
+
+// ---- Duplicate chart review ----
+/** Records a reviewer's decision on a suspected duplicate pair. It never merges anything: the chart is unchanged, and a
+ *  "merge" is a decision for HIM to carry out. Returns an error message (and records nothing) if a rule fails. */
+export function reviewDuplicate(a: RecordFacts, b: RecordFacts, decision: DuplicateDecision, rationale: string, actor = "human"): string | null {
+  if (!rationale.trim()) return "Enter a rationale.";
+  if (!b.mrn.trim()) return "Enter the other record's MRN.";
+  if (a.mrn === b.mrn) return "Both records have the same MRN; that is one chart, not a duplicate pair.";
+  const evidence = matchEvidence(a, b);
+  let primary: string | null = null;
+  let secondary: string | null = null;
+  let primaryReason = "";
+  if (decision === "merge") {
+    if (evidence.length < MIN_EVIDENCE_TO_MERGE) return `Not enough evidence to merge: only ${evidence.length ? evidence.join(", ") : "no identifiers"} matched. A shared date of birth alone is a coincidence. Choose "Not a duplicate" or "Escalate".`;
+    const pick = pickPrimary(a, b);
+    if (!pick.primary) return `${pick.reason}.`;
+    ({ primary, secondary } = pick);
+    primaryReason = pick.reason;
+  }
+  const id = `dup${state.duplicateReviews.length + 1}`;
+  const rev: DuplicateReview = { id, thisMrn: a.mrn, otherMrn: b.mrn, evidence, decision, primary, secondary, primaryReason, rationale: rationale.trim() };
+  set((s) => ({ duplicateReviews: [...s.duplicateReviews, rev], modal: null }));
+  log(actor, "duplicate_review", `${id}: ${a.mrn} vs ${b.mrn} -> ${decision}${primary ? ` (primary ${primary})` : ""}; matched: ${evidence.join(", ") || "none"}`);
+  return null;
+}
 
 // ---- Sign Visit ----
 export function signVisit(actor = "human") {
@@ -384,6 +554,12 @@ export interface Checkpoint {
   advisoryResponses: { kind: string | null; action: string }[];
   alertsAcked?: number[];
   visitSigned: boolean;
+  phoneCalls?: PhoneCall[];
+  letters?: LetterRecord[];
+  addenda?: Addendum[];
+  roiRequests?: RoiRequest[];
+  referrals?: Referral[];
+  duplicateReviews?: DuplicateReview[];
   audit: AuditEntry[];
   case: { id: string; medications?: Medication[]; problems?: Problem[] } | null;
 }
@@ -405,6 +581,12 @@ export function checkpoint(): Checkpoint {
       advisoryResponses: s.advisoryResponses,
       alertsAcked: s.alertsAcked,
       visitSigned: s.visitSigned,
+      phoneCalls: s.phoneCalls,
+      letters: s.letters,
+      addenda: s.addenda,
+      roiRequests: s.roiRequests,
+      referrals: s.referrals,
+      duplicateReviews: s.duplicateReviews,
       audit: s.audit,
       case: s.caseData ? { id: s.caseData.id, medications: s.caseData.medications, problems: s.caseData.problems } : null,
     }),
@@ -430,6 +612,12 @@ export function hydrate(c: Case, cp: Checkpoint, actor = "system") {
     advisoryResponses: cp.advisoryResponses ?? [],
     alertsAcked: cp.alertsAcked ?? [],
     visitSigned: !!cp.visitSigned,
+    phoneCalls: cp.phoneCalls ?? [],
+    letters: cp.letters ?? [],
+    addenda: cp.addenda ?? [],
+    roiRequests: cp.roiRequests ?? [],
+    referrals: cp.referrals ?? [],
+    duplicateReviews: cp.duplicateReviews ?? [],
     audit: cp.audit ?? [],
     runId: cp.runId,
     modal: null,

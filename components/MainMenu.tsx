@@ -23,6 +23,7 @@ export default function MainMenu() {
     menuSelect(catName, it.label, "human");
     if (it.activity) switchActivity(it.activity, "human");
     else if (it.action === "sign") openModal("signvisit");
+    else if (it.action === "phonecall" || it.action === "letter" || it.action === "addendum" || it.action === "roi" || it.action === "referrals" || it.action === "duplicates") openModal(it.action);
   }
 
   return (

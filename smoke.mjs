@@ -172,9 +172,86 @@ if (other) {
   log(true, "only one case is registered; the cross-case leak check was skipped");
 }
 
+// 10b. Patient Care workflows (phone call, letter, addendum, ROI, referral tracking, duplicate review)
+const S = () => page.evaluate(() => window.SimEHR.getState());
+const openMenu = async (label, testid) => {
+  await page.evaluate((l) => window.SimEHR.menuSelect(l), label);
+  await page.waitForSelector(`[data-testid="${testid}"]`, { timeout: 5000 });
+};
+await openMenu("Telephone Call", "modal-phonecall");
+await page.fill('[data-testid="call-reason"]', "smoke test callback");
+await page.click('[data-testid="call-save"]');
+assert((await S()).phoneCalls.length === 1, "Telephone Call: a call is recorded");
+await openMenu("Send Letter", "modal-letter");
+await page.fill('[data-testid="letter-body"]', "Smoke test letter.");
+await page.click('[data-testid="letter-send"]');
+assert((await S()).letters.length === 1, "Send Letter: a letter is recorded");
+await openMenu("Addendum", "modal-addendum");
+await page.fill('[data-testid="addendum-text"]', "Smoke test addendum.");
+await page.click('[data-testid="addendum-save"]');
+assert((await S()).addenda.length === 1, "Addendum: an addendum is recorded");
+
+await openMenu("Release of Information", "modal-roi");
+await page.selectOption('[data-testid="roi-kind"]', "authorization");
+await page.fill('[data-testid="roi-recipient"]', "Outside clinic");
+await page.fill('[data-testid="roi-info"]', "Last 2 years of notes");
+await page.fill('[data-testid="roi-received"]', "2026-01-01");
+await page.click('[data-testid="roi-submit"]');
+let roi = (await S()).roiRequests;
+assert(roi.length === 1 && roi[0].status.startsWith("Deficient") && roi[0].missing.length === 9, "ROI: an authorization with no elements is Deficient (9 missing)");
+assert(roi[0].due === "2026-01-31", "ROI: due date is 30 calendar days after receipt");
+await openMenu("Release of Information", "modal-roi");
+await page.fill('[data-testid="roi-recipient"]', "Self");
+await page.fill('[data-testid="roi-info"]', "Full chart");
+await page.click('[data-testid="roi-submit"]');
+roi = (await S()).roiRequests;
+assert(roi.length === 2 && roi[1].kind === "access" && roi[1].status === "Ready to release", "ROI: a patient access request is Ready to release");
+
+await openMenu("Referral Tracking", "modal-referrals");
+await page.fill('[data-testid="ref-specialty"]', "Cardiology");
+await page.fill('[data-testid="ref-reason"]', "smoke test");
+await page.fill('[data-testid="ref-orderedby"]', "Ordering, Doc");
+await page.click('[data-testid="ref-add"]');
+for (const step of ["Sent", "Scheduled", "Completed"]) {
+  await page.click('[data-testid="ref-next-ref1"]');
+  await page.click('[data-testid="ref-confirm"]');
+  assert((await S()).referrals[0].status === step, `Referral: advanced to ${step}`);
+}
+await page.click('[data-testid="ref-next-ref1"]');
+await page.fill('[data-testid="ref-from"]', "Ordering, Doc");
+await page.click('[data-testid="ref-confirm"]');
+assert((await S()).referrals[0].status === "Completed", "Referral: a report from the ordering provider is refused");
+await page.fill('[data-testid="ref-from"]', "Specialist, Sam");
+await page.click('[data-testid="ref-confirm"]');
+assert((await S()).referrals[0].status === "Report Received", "Referral: a specialist report closes the loop");
+
+await openMenu("Duplicate Chart Review", "modal-duplicates");
+await page.fill('[data-testid="dup-mrn"]', "SMOKE-2");
+await page.fill('[data-testid="dup-name"]', "Other, Joe");
+await page.fill('[data-testid="dup-dob"]', CASE.patient.dob);
+await page.selectOption('[data-testid="dup-decision"]', "merge");
+await page.fill('[data-testid="dup-why"]', "smoke test");
+await page.click('[data-testid="dup-save"]');
+assert((await S()).duplicateReviews.length === 0, "Duplicate review: a DOB-only merge is refused");
+await page.fill('[data-testid="dup-name"]', CASE.patient.name);
+await page.click('[data-testid="dup-save"]');
+assert((await S()).duplicateReviews.length === 0, "Duplicate review: a merge with no appointment history is refused");
+await page.fill('[data-testid="dup-a-last"]', "2026-01-01");
+await page.click('[data-testid="dup-save"]');
+const dup = (await S()).duplicateReviews;
+assert(dup.length === 1 && dup[0].decision === "merge" && dup[0].primary === CASE.patient.mrn, "Duplicate review: a 3-identifier merge is recorded with the chart that has visits as primary");
+const audit2 = await page.evaluate(() => window.SimEHR.getAuditLog().map((a) => a.action));
+for (const a of ["phone_call", "send_letter", "addendum", "roi_request", "referral_added", "referral_status", "duplicate_review"]) {
+  assert(audit2.includes(a), `audit log records ${a}`);
+}
+
 // 11. resetState() returns to a clean episode
 await page.evaluate(() => window.SimEHR.resetState());
 assert((await page.evaluate(() => window.SimEHR.getState().orders.length)) === 0, "resetState() clears the episode state");
+{
+  const z = await page.evaluate(() => window.SimEHR.getState());
+  assert(["phoneCalls", "letters", "addenda", "roiRequests", "referrals", "duplicateReviews"].every((k) => z[k].length === 0), "resetState() clears the Patient Care workflow records");
+}
 
 await browser.close();
 console.log(failures ? `\n${failures} CHECK(S) FAILED` : "\nALL CHECKS PASSED ✓");
