@@ -56,6 +56,13 @@ export const snapshot = () => {
       noteExam: s.noteExam,
       advisoryResponses: s.advisoryResponses,
       visitSigned: s.visitSigned,
+      phoneCalls: s.phoneCalls,
+      letters: s.letters,
+      addenda: s.addenda,
+      roiRequests: s.roiRequests,
+      referrals: s.referrals,
+      duplicateReviews: s.duplicateReviews,
+      disclosures: s.disclosures,
       runId: s.runId,
     }),
   );
@@ -110,6 +117,7 @@ export function installAgentApi() {
       store.menuSelect(found.cat, found.item.label, "agent");
       if (found.item.activity) store.switchActivity(found.item.activity, "agent");
       else if (found.item.action === "sign") store.openModal("signvisit", null, "agent");
+      else if (found.item.action === "phonecall" || found.item.action === "letter" || found.item.action === "addendum" || found.item.action === "roi" || found.item.action === "referrals" || found.item.action === "duplicates" || found.item.action === "disclosures") store.openModal(found.item.action, null, "agent");
     },
   };
 }
